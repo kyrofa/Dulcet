@@ -57,6 +57,7 @@ MainWindow::MainWindow(QWidget *parent) :
 	m_ui->songsTableView->setModel(m_musicTableModel);
 	m_ui->songsTableView->hideColumn(0);
 	m_ui->songsTableView->setItemDelegate(delegate);
+	m_ui->songsTableView->horizontalHeader()->setSectionsMovable(true);
 }
 
 MainWindow::~MainWindow()
@@ -115,6 +116,8 @@ void MainWindow::recursivelyImportMusic(const QString &path)
 
 void MainWindow::recursivelyImportMusic(const QFileInfo &fileInfo)
 {
+	qApp->processEvents();
+
 	if (fileInfo.isDir())
 	{
 		QDir directory(fileInfo.absoluteFilePath());
