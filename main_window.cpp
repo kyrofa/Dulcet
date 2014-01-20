@@ -1,9 +1,13 @@
 #include <QDebug>
+#include <QMediaPlayer>
+#include <QUrl>
+#include <QDir>
 #include <QtSql/QSqlDatabase>
 #include <QtSql/QSqlTableModel>
 #include <QtSql/QSqlQuery>
 #include <QMessageBox>
 
+#include "music_file_type_resolver.h"
 #include "music_table_item_delegate.h"
 
 #include "main_window.h"
@@ -11,9 +15,13 @@
 
 MainWindow::MainWindow(QWidget *parent) :
    QMainWindow(parent),
-   m_ui(new Ui::MainWindow)
+   m_ui(new Ui::MainWindow),
+   m_mediaPlayer(new QMediaPlayer(this)),
+   m_fileTypeResolver(new MusicFileTypeResolver)
 {
 	m_ui->setupUi(this);
+
+	TagLib::FileRef::addFileTypeResolver(m_fileTypeResolver);
 
 	QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE");
 	database.setDatabaseName("test.sqlite3");
@@ -41,12 +49,12 @@ MainWindow::MainWindow(QWidget *parent) :
 	m_musicTableModel->setHeaderData(2, Qt::Horizontal, tr("Artist"));
 	m_musicTableModel->setHeaderData(3, Qt::Horizontal, tr("Album"));
 
-	connect(m_ui->songsTableView, SIGNAL(importStatusUpdate(QString)), SLOT(handleImportStatusUpdate(QString)));
+	connect(m_ui->songsTableView, SIGNAL(requestImport(QList<QUrl>)), SLOT(handleImport(QList<QUrl>)));
+	connect(m_ui->songsTableView, SIGNAL(doubleClicked(QModelIndex)), SLOT(handleSongDoubleClicked(QModelIndex)));
 
 	MusicTableItemDelegate *delegate = new MusicTableItemDelegate(m_ui->songsTableView);
 
 	m_ui->songsTableView->setModel(m_musicTableModel);
-	m_ui->songsTableView->verticalHeader()->setVisible(false);
 	m_ui->songsTableView->hideColumn(0);
 	m_ui->songsTableView->setItemDelegate(delegate);
 }
@@ -54,9 +62,114 @@ MainWindow::MainWindow(QWidget *parent) :
 MainWindow::~MainWindow()
 {
 	delete m_ui;
+	delete m_fileTypeResolver;
 }
 
-void MainWindow::handleImportStatusUpdate(const QString &status)
+void MainWindow::handleSongDoubleClicked(const QModelIndex &index)
 {
-	statusBar()->showMessage(status);
+	playSong(QUrl::fromLocalFile(m_musicTableModel->data(m_musicTableModel->index(index.row(), 0)).toString()));
+}
+
+void MainWindow::playSong(const QUrl &fileUrl)
+{
+	m_mediaPlayer->setMedia(fileUrl);
+	m_mediaPlayer->setVolume(100);
+	m_mediaPlayer->play();
+}
+
+void MainWindow::handleImport(const QList<QUrl> &itemsToImport)
+{
+	// Extract the local paths of the files
+	for (int i = 0; i < itemsToImport.size(); ++i)
+	{
+		recursivelyImportMusic(itemsToImport.at(i).toLocalFile());
+	}
+}
+
+void MainWindow::on_playButton_clicked()
+{
+	if (m_mediaPlayer->mediaStatus() == QMediaPlayer::NoMedia)
+	{
+		QItemSelectionModel *selectionModel = m_ui->songsTableView->selectionModel();
+		if (selectionModel->hasSelection())
+		{
+			int row = selectionModel->selectedRows().at(0).row();
+			playSong(QUrl::fromLocalFile(m_musicTableModel->data(m_musicTableModel->index(row, 0)).toString()));
+		}
+	}
+	else
+	{
+		m_mediaPlayer->play();
+	}
+}
+
+void MainWindow::on_pauseButton_clicked()
+{
+	m_mediaPlayer->pause();
+}
+
+void MainWindow::recursivelyImportMusic(const QString &path)
+{
+	recursivelyImportMusic(QFileInfo(path));
+}
+
+void MainWindow::recursivelyImportMusic(const QFileInfo &fileInfo)
+{
+	if (fileInfo.isDir())
+	{
+		QDir directory(fileInfo.absoluteFilePath());
+
+		QFileInfoList fileInfoList = directory.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
+
+		foreach(const QFileInfo &thisFileInfo, fileInfoList)
+		{
+			recursivelyImportMusic(thisFileInfo);
+		}
+	}
+	else
+	{
+		if (isSupported(m_fileTypeResolver->mimeTypeForFile(fileInfo).name()))
+		{
+			int rowCount = m_musicTableModel->rowCount();
+			QString filePath = fileInfo.absoluteFilePath();
+			TagLib::FileRef fileTags(filePath.toUtf8().constData());
+
+			m_musicTableModel->insertRows(rowCount, 1);
+			m_musicTableModel->setData(m_musicTableModel->index(rowCount, 0),
+			                           filePath);
+			m_musicTableModel->setData(m_musicTableModel->index(rowCount, 1),
+			                           fileTags.tag()->title().toCString());
+			m_musicTableModel->setData(m_musicTableModel->index(rowCount, 2),
+			                           fileTags.tag()->artist().toCString());
+			m_musicTableModel->setData(m_musicTableModel->index(rowCount, 3),
+			                           fileTags.tag()->album().toCString());
+			m_musicTableModel->submit();
+
+			//qDebug() << "Artist:" << f.tag()->artist().toCString(); // artist == "Frank Zappa"
+			//			f.tag()->setAlbum("Fillmore East");
+			//			f.save();
+			//			TagLib::FileRef g("Free City Rhymes.ogg");
+			//			TagLib::String album = g.tag()->album(); // album == "NYC Ghosts & Flowers"
+			//			g.tag()->setTrack(1);
+			//			g.save();
+
+			statusBar()->showMessage(tr("Importing %1").arg(fileInfo.fileName()));
+		}
+	}
+}
+
+bool MainWindow::isSupported(const QString &mimeType, const QStringList &codecs)
+{
+	// QMediaPlayer::hasSupport() is buggy right now... it just always returns MaybeSupported.
+	// So we'll supplement it here by making sure it's either video or audio (thus fairly likely
+	// to play successfully) and then check for support (in case it's fixed in the future).
+	if (mimeType.startsWith("audio/") || mimeType.startsWith("video/"))
+	{
+		if (m_mediaPlayer->hasSupport(mimeType, codecs) >= QMultimedia::MaybeSupported)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }

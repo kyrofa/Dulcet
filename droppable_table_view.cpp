@@ -1,3 +1,4 @@
+// Qt includes
 #include <QDebug>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -5,25 +6,19 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QMediaPlayer>
-#include <QMimeDatabase>
 #include <QDir>
-#include <QUrl>
 
-#include <taglib/fileref.h>
-
+// Local includes
 #include "droppable_table_view.h"
 
 DroppableTableView::DroppableTableView(QWidget *parent) :
-   QTableView(parent),
-   m_mediaPlayer(new QMediaPlayer(this)),
-   m_mimeDatabase(new QMimeDatabase)
+   QTableView(parent)
 {
 	setAcceptDrops(true);
 }
 
 DroppableTableView::~DroppableTableView()
 {
-	delete m_mimeDatabase;
 }
 
 void DroppableTableView::dragEnterEvent(QDragEnterEvent *event)
@@ -47,13 +42,7 @@ void DroppableTableView::dropEvent(QDropEvent *event)
 
 	if (mimeData->hasUrls())
 	{
-		QList<QUrl> urlList = mimeData->urls();
-
-		// extract the local paths of the files
-		for (int i = 0; i < urlList.size(); ++i)
-		{
-			recursivelyImportMusic(urlList.at(i).toLocalFile());
-		}
+		emit requestImport(mimeData->urls());
 	}
 	else
 	{
@@ -61,75 +50,4 @@ void DroppableTableView::dropEvent(QDropEvent *event)
 	}
 
 	event->acceptProposedAction();
-}
-
-void DroppableTableView::recursivelyImportMusic(const QString &path)
-{
-	recursivelyImportMusic(QFileInfo(path));
-}
-
-void DroppableTableView::recursivelyImportMusic(const QFileInfo &fileInfo)
-{
-	if (fileInfo.isDir())
-	{
-		QDir directory(fileInfo.absoluteFilePath());
-
-		QFileInfoList fileInfoList = directory.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
-
-		foreach(const QFileInfo &thisFileInfo, fileInfoList)
-		{
-			recursivelyImportMusic(thisFileInfo);
-		}
-	}
-	else
-	{
-		if (isSupported(m_mimeDatabase->mimeTypeForFile(fileInfo).name()))
-		{
-			int rowCount = model()->rowCount();
-			QString filePath = fileInfo.absoluteFilePath();
-			TagLib::FileRef fileTags(filePath.toUtf8().constData());
-
-			model()->insertRows(rowCount, 1);
-			model()->setData(model()->index(rowCount, 0),
-			                 filePath);
-			model()->setData(model()->index(rowCount, 1),
-			                 fileTags.tag()->title().toCString());
-			model()->setData(model()->index(rowCount, 2),
-			                 fileTags.tag()->artist().toCString());
-			model()->setData(model()->index(rowCount, 3),
-			                 fileTags.tag()->album().toCString());
-			model()->submit();
-
-			//qDebug() << "Artist:" << f.tag()->artist().toCString(); // artist == "Frank Zappa"
-//			f.tag()->setAlbum("Fillmore East");
-//			f.save();
-//			TagLib::FileRef g("Free City Rhymes.ogg");
-//			TagLib::String album = g.tag()->album(); // album == "NYC Ghosts & Flowers"
-//			g.tag()->setTrack(1);
-//			g.save();
-
-
-			emit importStatusUpdate(tr("Importing %1").arg(fileInfo.fileName()));
-
-//			m_mediaPlayer->setMedia(QUrl::fromLocalFile(fileInfo.absoluteFilePath()));
-//			m_mediaPlayer->setVolume(50);
-//			m_mediaPlayer->play();
-		}
-	}
-}
-
-bool DroppableTableView::isSupported(const QString &mimeType, const QStringList &codecs)
-{
-	// QMediaPlayer::hasSupport() is buggy right now... it just always returns MaybeSupported.
-	// So we'll supplement it here by making sure it's either video or audio (thus fairly likely
-	// to play successfully) and then check for support (in case it's fixed in the future).
-	if (mimeType.startsWith("audio/") || mimeType.startsWith("video/"))
-	{
-		if (m_mediaPlayer->hasSupport(mimeType, codecs) >= QMultimedia::MaybeSupported)
-		{
-			return true;
-		}
-	}
-
-	return false;
 }

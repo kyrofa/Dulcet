@@ -3,9 +3,7 @@
 
 #include <QTableView>
 #include <QFileInfo>
-
-class QMediaPlayer;
-class QMimeDatabase;
+#include <QUrl>
 
 class DroppableTableView : public QTableView
 {
@@ -21,16 +19,8 @@ class DroppableTableView : public QTableView
 		void dragLeaveEvent(QDragLeaveEvent *event);
 		void dropEvent(QDropEvent *event);
 
-		void recursivelyImportMusic(const QString &path);
-		void recursivelyImportMusic(const QFileInfo &fileInfo);
-		bool isSupported(const QString& mimeType, const QStringList &codecs = QStringList());
-
 	signals:
-		void importStatusUpdate(const QString &status);
-
-	private:
-		QMediaPlayer *m_mediaPlayer;
-		QMimeDatabase *m_mimeDatabase;
+		void requestImport(const QList<QUrl> &itemsToImport);
 };
 
 #endif // DROPPABLE_TABLE_VIEW_H
