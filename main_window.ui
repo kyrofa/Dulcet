@@ -19,31 +19,57 @@
      <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="0,1,0">
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout">
+        <property name="spacing">
+         <number>0</number>
+        </property>
         <item>
          <widget class="QPushButton" name="previousButon">
           <property name="text">
-           <string>prev</string>
+           <string/>
+          </property>
+          <property name="icon">
+           <iconset resource="images.qrc">
+            <normaloff>:/images/previous_button</normaloff>:/images/previous_button</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>24</width>
+            <height>24</height>
+           </size>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="playButton">
+         <widget class="QPushButton" name="playPauseButton">
           <property name="text">
-           <string>play</string>
+           <string/>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="pauseButton">
-          <property name="text">
-           <string>pause</string>
+          <property name="icon">
+           <iconset resource="images.qrc">
+            <normaloff>:/images/play_button</normaloff>:/images/play_button</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>24</width>
+            <height>24</height>
+           </size>
           </property>
          </widget>
         </item>
         <item>
          <widget class="QPushButton" name="nextButton">
           <property name="text">
-           <string>next</string>
+           <string/>
+          </property>
+          <property name="icon">
+           <iconset resource="images.qrc">
+            <normaloff>:/images/next_button</normaloff>:/images/next_button</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>24</width>
+            <height>24</height>
+           </size>
           </property>
          </widget>
         </item>
@@ -134,6 +160,8 @@
    <header>droppable_table_view.h</header>
   </customwidget>
  </customwidgets>
- <resources/>
+ <resources>
+  <include location="images.qrc"/>
+ </resources>
  <connections/>
 </ui>

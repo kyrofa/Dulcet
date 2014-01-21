@@ -2,6 +2,7 @@
 #define MAIN_WINDOW_H
 
 #include <QMainWindow>
+#include <QMediaPlayer>
 #include <QFileInfo>
 #include <QUrl>
 
@@ -10,7 +11,6 @@ namespace Ui
 	class MainWindow;
 }
 
-class QMediaPlayer;
 class MusicFileTypeResolver;
 class QSqlTableModel;
 
@@ -26,9 +26,9 @@ class MainWindow : public QMainWindow
 		void handleSongDoubleClicked(const QModelIndex &index);
 		void playSong(const QUrl &fileUrl);
 		void handleImport(const QList<QUrl> &itemsToImport);
+		void handlePlayerStateChange(QMediaPlayer::State newState);
 
-		void on_playButton_clicked();
-		void on_pauseButton_clicked();
+		void on_playPauseButton_clicked();
 
 	private:
 		void recursivelyImportMusic(const QString &path);

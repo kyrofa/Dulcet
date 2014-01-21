@@ -1,5 +1,4 @@
 #include <QDebug>
-#include <QMediaPlayer>
 #include <QUrl>
 #include <QDir>
 #include <QtSql/QSqlDatabase>
@@ -49,6 +48,8 @@ MainWindow::MainWindow(QWidget *parent) :
 	m_musicTableModel->setHeaderData(2, Qt::Horizontal, tr("Artist"));
 	m_musicTableModel->setHeaderData(3, Qt::Horizontal, tr("Album"));
 
+	connect(m_mediaPlayer, SIGNAL(stateChanged(QMediaPlayer::State)), SLOT(handlePlayerStateChange(QMediaPlayer::State)));
+
 	connect(m_ui->songsTableView, SIGNAL(requestImport(QList<QUrl>)), SLOT(handleImport(QList<QUrl>)));
 	connect(m_ui->songsTableView, SIGNAL(doubleClicked(QModelIndex)), SLOT(handleSongDoubleClicked(QModelIndex)));
 
@@ -87,26 +88,43 @@ void MainWindow::handleImport(const QList<QUrl> &itemsToImport)
 	}
 }
 
-void MainWindow::on_playButton_clicked()
+void MainWindow::handlePlayerStateChange(QMediaPlayer::State newState)
 {
-	if (m_mediaPlayer->mediaStatus() == QMediaPlayer::NoMedia)
+	switch (newState)
 	{
-		QItemSelectionModel *selectionModel = m_ui->songsTableView->selectionModel();
-		if (selectionModel->hasSelection())
-		{
-			int row = selectionModel->selectedRows().at(0).row();
-			playSong(QUrl::fromLocalFile(m_musicTableModel->data(m_musicTableModel->index(row, 0)).toString()));
-		}
-	}
-	else
-	{
-		m_mediaPlayer->play();
+		case QMediaPlayer::PlayingState:
+			m_ui->playPauseButton->setIcon(QIcon(":/images/pause_button"));
+			break;
+		default:
+			m_ui->playPauseButton->setIcon(QIcon(":/images/play_button"));
+			break;
 	}
 }
 
-void MainWindow::on_pauseButton_clicked()
+void MainWindow::on_playPauseButton_clicked()
 {
-	m_mediaPlayer->pause();
+	switch (m_mediaPlayer->state())
+	{
+		case QMediaPlayer::StoppedState:
+		{
+			QItemSelectionModel *selectionModel = m_ui->songsTableView->selectionModel();
+			if (selectionModel->hasSelection())
+			{
+				int row = selectionModel->selectedRows().at(0).row();
+				playSong(QUrl::fromLocalFile(m_musicTableModel->data(m_musicTableModel->index(row, 0)).toString()));
+			}
+			break;
+		}
+		case QMediaPlayer::PlayingState:
+			m_mediaPlayer->pause();
+			break;
+		case QMediaPlayer::PausedState:
+			m_mediaPlayer->play();
+			break;
+		default:
+			m_mediaPlayer->stop();
+			break;
+	}
 }
 
 void MainWindow::recursivelyImportMusic(const QString &path)
