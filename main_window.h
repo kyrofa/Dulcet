@@ -4,6 +4,8 @@
 #include <QMainWindow>
 #include <QMediaPlayer>
 #include <QFileInfo>
+#include <QStack>
+#include <QPersistentModelIndex>
 #include <QUrl>
 
 namespace Ui
@@ -23,12 +25,14 @@ class MainWindow : public QMainWindow
 		~MainWindow();
 
 	private slots:
-		void handleSongDoubleClicked(const QModelIndex &index);
+		void playSong(const QModelIndex &index, bool saveHistory = true);
 		void playSong(const QUrl &fileUrl);
 		void handleImport(const QList<QUrl> &itemsToImport);
 		void handlePlayerStateChange(QMediaPlayer::State newState);
 
 		void on_playPauseButton_clicked();
+		void on_previousButton_clicked();
+		void on_nextButton_clicked();
 
 	private:
 		void recursivelyImportMusic(const QString &path);
@@ -40,6 +44,8 @@ class MainWindow : public QMainWindow
 		QMediaPlayer *m_mediaPlayer;
 		MusicFileTypeResolver *m_fileTypeResolver;
 		QSqlTableModel *m_musicTableModel;
+		QStack<QPersistentModelIndex> m_playHistory;
+		QPersistentModelIndex m_currentSong;
 };
 
 #endif // MAIN_WINDOW_H

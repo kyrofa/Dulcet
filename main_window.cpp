@@ -1,9 +1,10 @@
 #include <QDebug>
 #include <QUrl>
 #include <QDir>
-#include <QtSql/QSqlDatabase>
-#include <QtSql/QSqlTableModel>
-#include <QtSql/QSqlQuery>
+#include <QSqlDatabase>
+#include <QSqlTableModel>
+#include <QSqlQuery>
+#include <QSqlRecord>
 #include <QMessageBox>
 
 #include "music_file_type_resolver.h"
@@ -11,6 +12,8 @@
 
 #include "main_window.h"
 #include "ui_main_window.h"
+
+#define TIME_TO_DECIDE_MS 5000 // Milliseconds
 
 MainWindow::MainWindow(QWidget *parent) :
    QMainWindow(parent),
@@ -51,7 +54,7 @@ MainWindow::MainWindow(QWidget *parent) :
 	connect(m_mediaPlayer, SIGNAL(stateChanged(QMediaPlayer::State)), SLOT(handlePlayerStateChange(QMediaPlayer::State)));
 
 	connect(m_ui->songsTableView, SIGNAL(requestImport(QList<QUrl>)), SLOT(handleImport(QList<QUrl>)));
-	connect(m_ui->songsTableView, SIGNAL(doubleClicked(QModelIndex)), SLOT(handleSongDoubleClicked(QModelIndex)));
+	connect(m_ui->songsTableView, SIGNAL(doubleClicked(QModelIndex)), SLOT(playSong(QModelIndex)));
 
 	MusicTableItemDelegate *delegate = new MusicTableItemDelegate(m_ui->songsTableView);
 
@@ -67,9 +70,24 @@ MainWindow::~MainWindow()
 	delete m_fileTypeResolver;
 }
 
-void MainWindow::handleSongDoubleClicked(const QModelIndex &index)
+void MainWindow::playSong(const QModelIndex &index, bool saveHistory)
 {
-	playSong(QUrl::fromLocalFile(m_musicTableModel->data(m_musicTableModel->index(index.row(), 0)).toString()));
+	if (saveHistory && m_currentSong.isValid())
+	{
+		m_playHistory.push(m_currentSong);
+	}
+
+	m_currentSong = QPersistentModelIndex(index);
+
+	QSqlRecord sqlRecord = m_musicTableModel->record(m_currentSong.row());
+	QString title = sqlRecord.value("title").toString();
+	QString artist = sqlRecord.value("artist").toString();
+	QString album = sqlRecord.value("album").toString();
+
+	m_ui->songInformationLabel->setText(tr("<strong>%1</strong><br />%2 - %3").arg(title).arg(artist).arg(album));
+	setWindowTitle(tr("%1 - %2  |  %3").arg(title).arg(artist).arg(QApplication::applicationName()));
+
+	playSong(QUrl::fromLocalFile(m_musicTableModel->record(m_currentSong.row()).value("path").toString()));
 }
 
 void MainWindow::playSong(const QUrl &fileUrl)
@@ -124,6 +142,36 @@ void MainWindow::on_playPauseButton_clicked()
 		default:
 			m_mediaPlayer->stop();
 			break;
+	}
+}
+
+void MainWindow::on_previousButton_clicked()
+{
+	if ((m_mediaPlayer->position() > TIME_TO_DECIDE_MS) && m_currentSong.isValid())
+	{
+		playSong(m_currentSong, false);
+	}
+	else if (!m_playHistory.empty())
+	{
+		QPersistentModelIndex previousIndex = m_playHistory.pop();
+
+		if (previousIndex.isValid())
+		{
+			playSong(previousIndex, false);
+		}
+	}
+}
+
+void MainWindow::on_nextButton_clicked()
+{
+	if (m_currentSong.isValid())
+	{
+		QModelIndex nextIndex = m_musicTableModel->index(m_currentSong.row()+1, 0);
+
+		if (nextIndex.isValid())
+		{
+			playSong(nextIndex);
+		}
 	}
 }
 
