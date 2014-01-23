@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QSqlDatabase>
 #include <QSqlTableModel>
+#include <QSortFilterProxyModel>
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QMessageBox>
@@ -19,7 +20,8 @@ MainWindow::MainWindow(QWidget *parent) :
    QMainWindow(parent),
    m_ui(new Ui::MainWindow),
    m_mediaPlayer(new QMediaPlayer(this)),
-   m_fileTypeResolver(new MusicFileTypeResolver)
+   m_fileTypeResolver(new MusicFileTypeResolver),
+   m_proxyModel(new QSortFilterProxyModel(this))
 {
 	m_ui->setupUi(this);
 
@@ -51,6 +53,8 @@ MainWindow::MainWindow(QWidget *parent) :
 	m_musicTableModel->setHeaderData(2, Qt::Horizontal, tr("Artist"));
 	m_musicTableModel->setHeaderData(3, Qt::Horizontal, tr("Album"));
 
+	connect(m_ui->searchLineEdit, SIGNAL(textChanged(QString)), SLOT(handleSearch(QString)));
+
 	connect(m_mediaPlayer, SIGNAL(stateChanged(QMediaPlayer::State)), SLOT(handlePlayerStateChange(QMediaPlayer::State)));
 
 	connect(m_ui->songsTableView, SIGNAL(requestImport(QList<QUrl>)), SLOT(handleImport(QList<QUrl>)));
@@ -58,7 +62,9 @@ MainWindow::MainWindow(QWidget *parent) :
 
 	MusicTableItemDelegate *delegate = new MusicTableItemDelegate(m_ui->songsTableView);
 
-	m_ui->songsTableView->setModel(m_musicTableModel);
+	m_proxyModel->setSourceModel(m_musicTableModel);
+	m_proxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+	m_ui->songsTableView->setModel(m_proxyModel);
 	m_ui->songsTableView->hideColumn(0);
 	m_ui->songsTableView->setItemDelegate(delegate);
 	m_ui->songsTableView->horizontalHeader()->setSectionsMovable(true);
@@ -79,7 +85,7 @@ void MainWindow::playSong(const QModelIndex &index, bool saveHistory)
 
 	m_currentSong = QPersistentModelIndex(index);
 
-	QSqlRecord sqlRecord = m_musicTableModel->record(m_currentSong.row());
+	QSqlRecord sqlRecord = m_musicTableModel->record(m_proxyModel->mapToSource(m_currentSong).row());
 	QString title = sqlRecord.value("title").toString();
 	QString artist = sqlRecord.value("artist").toString();
 	QString album = sqlRecord.value("album").toString();
@@ -87,7 +93,7 @@ void MainWindow::playSong(const QModelIndex &index, bool saveHistory)
 	m_ui->songInformationLabel->setText(tr("<strong>%1</strong><br />%2 - %3").arg(title).arg(artist).arg(album));
 	setWindowTitle(tr("%1 - %2  |  %3").arg(title).arg(artist).arg(QApplication::applicationName()));
 
-	playSong(QUrl::fromLocalFile(m_musicTableModel->record(m_currentSong.row()).value("path").toString()));
+	playSong(QUrl::fromLocalFile(sqlRecord.value("path").toString()));
 }
 
 void MainWindow::playSong(const QUrl &fileUrl)
@@ -117,6 +123,11 @@ void MainWindow::handlePlayerStateChange(QMediaPlayer::State newState)
 			m_ui->playPauseButton->setIcon(QIcon(":/images/play_button"));
 			break;
 	}
+}
+
+void MainWindow::handleSearch(const QString &searchString)
+{
+	m_proxyModel->setFilterFixedString(searchString);
 }
 
 void MainWindow::on_playPauseButton_clicked()
@@ -166,7 +177,7 @@ void MainWindow::on_nextButton_clicked()
 {
 	if (m_currentSong.isValid())
 	{
-		QModelIndex nextIndex = m_musicTableModel->index(m_currentSong.row()+1, 0);
+		QModelIndex nextIndex = m_proxyModel->index(m_currentSong.row() + 1, 0);
 
 		if (nextIndex.isValid())
 		{

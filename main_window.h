@@ -15,6 +15,7 @@ namespace Ui
 
 class MusicFileTypeResolver;
 class QSqlTableModel;
+class QSortFilterProxyModel;
 
 class MainWindow : public QMainWindow
 {
@@ -29,6 +30,7 @@ class MainWindow : public QMainWindow
 		void playSong(const QUrl &fileUrl);
 		void handleImport(const QList<QUrl> &itemsToImport);
 		void handlePlayerStateChange(QMediaPlayer::State newState);
+		void handleSearch(const QString &searchString);
 
 		void on_playPauseButton_clicked();
 		void on_previousButton_clicked();
@@ -46,6 +48,7 @@ class MainWindow : public QMainWindow
 		QSqlTableModel *m_musicTableModel;
 		QStack<QPersistentModelIndex> m_playHistory;
 		QPersistentModelIndex m_currentSong;
+		QSortFilterProxyModel *m_proxyModel;
 };
 
 #endif // MAIN_WINDOW_H
