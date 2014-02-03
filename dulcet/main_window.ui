@@ -14,7 +14,7 @@
    <string>Dulcet</string>
   </property>
   <widget class="QWidget" name="centralWidget">
-   <layout class="QVBoxLayout" name="verticalLayout_2">
+   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="0,1">
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="0,1,0">
       <item>
@@ -80,7 +80,7 @@
         <item>
          <widget class="QLabel" name="songInformationLabel">
           <property name="text">
-           <string>Song Title</string>
+           <string>(no song playing)</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignCenter</set>
@@ -102,40 +102,22 @@
      </layout>
     </item>
     <item>
-     <widget class="DroppableTableView" name="songsTableView">
-      <property name="editTriggers">
-       <set>QAbstractItemView::SelectedClicked</set>
-      </property>
-      <property name="tabKeyNavigation">
-       <bool>false</bool>
-      </property>
-      <property name="alternatingRowColors">
-       <bool>true</bool>
-      </property>
-      <property name="selectionBehavior">
-       <enum>QAbstractItemView::SelectRows</enum>
-      </property>
-      <property name="showGrid">
-       <bool>false</bool>
-      </property>
-      <property name="gridStyle">
-       <enum>Qt::SolidLine</enum>
-      </property>
-      <property name="sortingEnabled">
-       <bool>true</bool>
-      </property>
-      <attribute name="horizontalHeaderCascadingSectionResizes">
-       <bool>true</bool>
-      </attribute>
-      <attribute name="horizontalHeaderHighlightSections">
-       <bool>false</bool>
-      </attribute>
-      <attribute name="horizontalHeaderStretchLastSection">
-       <bool>true</bool>
-      </attribute>
-      <attribute name="verticalHeaderVisible">
-       <bool>false</bool>
-      </attribute>
+     <widget class="DroppableWidget" name="viewWidget" native="true">
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="QLabel" name="placeHolderLabel">
+         <property name="styleSheet">
+          <string notr="true">QLabel
+{
+	background-color: white;
+}</string>
+         </property>
+         <property name="text">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-size:18pt; font-weight:600;&quot;&gt;Dulcet doesn't know about any of your music!&lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;br/&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-size:10pt;&quot;&gt;Feel free to drag some here.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
      </widget>
     </item>
    </layout>
@@ -149,15 +131,41 @@
      <height>20</height>
     </rect>
    </property>
+   <widget class="QMenu" name="fileMenu">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="importAction"/>
+    <addaction name="separator"/>
+    <addaction name="preferencesAction"/>
+   </widget>
+   <widget class="QMenu" name="viewMenu">
+    <property name="title">
+     <string>View</string>
+    </property>
+   </widget>
+   <addaction name="fileMenu"/>
+   <addaction name="viewMenu"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <action name="importAction">
+   <property name="text">
+    <string>Import</string>
+   </property>
+  </action>
+  <action name="preferencesAction">
+   <property name="text">
+    <string>Preferences</string>
+   </property>
+  </action>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
  <customwidgets>
   <customwidget>
-   <class>DroppableTableView</class>
-   <extends>QTableView</extends>
-   <header>droppable_table_view.h</header>
+   <class>DroppableWidget</class>
+   <extends>QWidget</extends>
+   <header>droppable_widget.h</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources>

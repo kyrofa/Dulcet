@@ -9,34 +9,34 @@
 #include <QDir>
 
 // Local includes
-#include "droppable_table_view.h"
+#include "droppable_widget.h"
 
-DroppableTableView::DroppableTableView(QWidget *parent) :
-   QTableView(parent)
+DroppableWidget::DroppableWidget(QWidget *parent) :
+   QWidget(parent)
 {
 	setAcceptDrops(true);
 }
 
-DroppableTableView::~DroppableTableView()
+DroppableWidget::~DroppableWidget()
 {
 }
 
-void DroppableTableView::dragEnterEvent(QDragEnterEvent *event)
-{
-	event->acceptProposedAction();
-}
-
-void DroppableTableView::dragMoveEvent(QDragMoveEvent *event)
+void DroppableWidget::dragEnterEvent(QDragEnterEvent *event)
 {
 	event->acceptProposedAction();
 }
 
-void DroppableTableView::dragLeaveEvent(QDragLeaveEvent *event)
+void DroppableWidget::dragMoveEvent(QDragMoveEvent *event)
+{
+	event->acceptProposedAction();
+}
+
+void DroppableWidget::dragLeaveEvent(QDragLeaveEvent *event)
 {
 	event->accept();
 }
 
-void DroppableTableView::dropEvent(QDropEvent *event)
+void DroppableWidget::dropEvent(QDropEvent *event)
 {
 	const QMimeData *mimeData = event->mimeData();
 
@@ -46,7 +46,7 @@ void DroppableTableView::dropEvent(QDropEvent *event)
 	}
 	else
 	{
-		qWarning("WARNING: Cannot display data");
+		qWarning("WARNING: Cannot import music!");
 	}
 
 	event->acceptProposedAction();

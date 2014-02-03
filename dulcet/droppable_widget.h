@@ -5,13 +5,13 @@
 #include <QFileInfo>
 #include <QUrl>
 
-class DroppableTableView : public QTableView
+class DroppableWidget : public QWidget
 {
 	Q_OBJECT
 
 	public:
-		explicit DroppableTableView(QWidget *parent = 0);
-		~DroppableTableView();
+		explicit DroppableWidget(QWidget *parent = 0);
+		~DroppableWidget();
 
 	protected:
 		void dragEnterEvent(QDragEnterEvent *event);

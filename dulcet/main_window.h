@@ -4,8 +4,10 @@
 #include <QMainWindow>
 #include <QMediaPlayer>
 #include <QFileInfo>
-#include <QStack>
 #include <QPersistentModelIndex>
+#include <QSqlRecord>
+#include <QMap>
+#include <QDir>
 #include <QUrl>
 
 namespace Ui
@@ -14,8 +16,10 @@ namespace Ui
 }
 
 class MusicFileTypeResolver;
+class MediaManager;
 class QSqlTableModel;
 class QSortFilterProxyModel;
+class MusicViewInterface;
 
 class MainWindow : public QMainWindow
 {
@@ -25,30 +29,44 @@ class MainWindow : public QMainWindow
 		explicit MainWindow(QWidget *parent = 0);
 		~MainWindow();
 
+	protected slots:
+		virtual void closeEvent(QCloseEvent *event);
+
 	private slots:
-		void playSong(const QModelIndex &index, bool saveHistory = true);
-		void playSong(const QUrl &fileUrl);
+		void playSong(const QModelIndex &index);
 		void handleImport(const QList<QUrl> &itemsToImport);
+		void handleImportedMedia(int row, const QSqlRecord &record);
+		void handleMediaDeleted(const QSqlRecord &recordRemoved);
 		void handlePlayerStateChange(QMediaPlayer::State newState);
 		void handleSearch(const QString &searchString);
+
+		void handleMusicViewChange(QAction *action);
+		void showImportDialog();
+		void showPreferences();
 
 		void on_playPauseButton_clicked();
 		void on_previousButton_clicked();
 		void on_nextButton_clicked();
 
 	private:
-		void recursivelyImportMusic(const QString &path);
-		void recursivelyImportMusic(const QFileInfo &fileInfo);
-		bool isSupported(const QString& mimeType, const QStringList &codecs = QStringList());
+		void showMusicView(const QString &musicView);
+		bool loadPlugins();
+		void saveSettings();
+		void loadSettings();
+
+	signals:
+		void playing(const QPersistentModelIndex& index);
 
 	private:
+		typedef QMap<QString, MusicViewInterface*> MusicViewMap_t;
 		Ui::MainWindow *m_ui;
 		QMediaPlayer *m_mediaPlayer;
+		MediaManager *m_mediaManager;
 		MusicFileTypeResolver *m_fileTypeResolver;
-		QSqlTableModel *m_musicTableModel;
-		QStack<QPersistentModelIndex> m_playHistory;
-		QPersistentModelIndex m_currentSong;
+		QSqlTableModel *m_mediaTableModel;
 		QSortFilterProxyModel *m_proxyModel;
+		MusicViewMap_t m_musicViews;
+		MusicViewInterface *m_currentMusicView;
 };
 
 #endif // MAIN_WINDOW_H
