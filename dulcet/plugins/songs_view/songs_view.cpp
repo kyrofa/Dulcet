@@ -26,14 +26,28 @@ void SongsView::setModel(QAbstractItemModel *model)
 {
 	m_tableView->setModel(model);
 
-	m_tableView->hideColumn(0);
-	m_tableView->hideColumn(1);
-	m_tableView->hideColumn(5);
-	m_tableView->hideColumn(6);
-	m_tableView->hideColumn(7);
-	m_tableView->hideColumn(8);
-	m_tableView->hideColumn(9);
+	int columnCount = model->columnCount();
+	for (int column = 0; column < columnCount; ++column)
+	{
+		m_columnNames[model->headerData(column, Qt::Horizontal).toString()] = column;
+		m_tableView->hideColumn(column);
+	}
 
+	// These are the default visible columns-- the state is saved
+	// in the settings later
+	QStringList visibleColumnNames;
+	visibleColumnNames << "title" << "artist" << "album";
+	foreach (const QString &thisColumnName, visibleColumnNames)
+	{
+		if (m_columnNames.contains(thisColumnName))
+		{
+			m_tableView->showColumn(m_columnNames.value(thisColumnName));
+		}
+	}
+
+	emit columnVisibilitiesChanged(visibleColumnNames);
+
+	// These are default widths-- the state is saved in the settings later
 	int columnWidth = m_tableView->width()/3;
 	m_tableView->setColumnWidth(1, columnWidth);
 	m_tableView->setColumnWidth(2, columnWidth);
@@ -64,6 +78,23 @@ void SongsView::setModel(QAbstractItemModel *model)
 
 	// Don't show table borders
 	m_tableView->setShowGrid(false);
+}
+
+QStringList SongsView::visibleColumns()
+{
+	QStringList visibleColumns;
+
+	QHash<QString, int>::const_iterator iterator;
+
+	for (iterator = m_columnNames.constBegin(); iterator != m_columnNames.constEnd(); ++iterator)
+	{
+		if (!m_tableView->horizontalHeader()->isSectionHidden(iterator.value()))
+		{
+			visibleColumns.append(iterator.key());
+		}
+	}
+
+	return visibleColumns;
 }
 
 QModelIndex SongsView::nextSong()

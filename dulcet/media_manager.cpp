@@ -2,69 +2,18 @@
 #include <QMediaPlayer>
 #include <QFileSystemWatcher>
 #include <QSqlTableModel>
+#include <QSqlQuery>
 #include <QSqlRecord>
+#include <QSqlError>
+#include <QThread>
 #include <QDir>
 #include <QTime>
 
+#include "dulcet_utilities.h"
+#include "media_discoverer.h"
+#include "media_organizer.h"
 #include "music_file_type_resolver.h"
 #include "media_manager.h"
-
-// Neither the directory nor the file need to exist
-bool isDirectoryAncestorOfFile(const QDir &directory, const QFileInfo& file)
-{
-//	if (directory.exists() && file.exists())
-//	{
-		return file.absolutePath().contains(directory.absolutePath());
-//	}
-
-//	return false;
-}
-
-bool saveTagsToFile(TagLib::FileRef &file, const QSqlRecord &record)
-{
-	TagLib::Tag *tag = file.tag();
-
-	if (tag)
-	{
-		tag->setTitle(record.value("title").toString().toUtf8().constData());
-		tag->setArtist(record.value("artist").toString().toUtf8().constData());
-		tag->setAlbum(record.value("album").toString().toUtf8().constData());
-		tag->setComment(record.value("comment").toString().toUtf8().constData());
-		tag->setGenre(record.value("genre").toString().toUtf8().constData());
-		tag->setYear(record.value("year").toUInt());
-		tag->setTrack(record.value("track").toUInt());
-
-		return file.save();
-	}
-
-	qWarning("Invalid tag! Cannot save to file...");
-
-	return false;
-}
-
-bool importTagsToRecord(const TagLib::FileRef &file, QSqlRecord &record)
-{
-	TagLib::Tag *tag = file.tag();
-
-	if (tag)
-	{
-		record.setValue("path", file.file()->name());
-		record.setValue("title", tag->title().toCString(true));
-		record.setValue("artist", tag->artist().toCString(true));
-		record.setValue("album", tag->album().toCString(true));
-		record.setValue("comment", tag->comment().toCString(true));
-		record.setValue("genre", tag->genre().toCString(true));
-		record.setValue("year", tag->year());
-		record.setValue("track", tag->track());
-
-		return true;
-	}
-
-	qWarning("Invalid tag! Cannot import to record...");
-
-
-	return false;
-}
 
 ////////// BEGIN PRIVATE DATA //////////
 class MediaManagerPrivate
@@ -73,21 +22,24 @@ class MediaManagerPrivate
 
 	public:
 		MediaManagerPrivate();
+		~MediaManagerPrivate();
 
-		virtual bool organizeFile(TagLib::FileRef &file);
-		virtual bool generateAnticipatedPath(const TagLib::FileRef &file, QString &path,
-		                                     QString &fileName, QString &fileSuffix);
 		virtual void updateWatchedPaths(bool reset = false);
+		virtual void removeDuplicateDiscoveries(const QStringList &mediaDiscovered, QStringList &newList);
 		virtual void validateLibrary();
-		virtual void recursivelyImportMedia(const QFileInfo &fileInfo);
+
+		virtual bool beginImportMedia();
 
 		// slots:
-		virtual void _q_modelDestroyed();
+		virtual void _q_mediaDiscovered(const QStringList &mediaDiscovered);
+		virtual void _q_mediaOrganized(const TagLib::FileRef &taggedFile);
 		virtual void _q_modelBeforeUpdate(int row, QSqlRecord &record);
 		virtual void _q_directoryChanged(const QString &directory);
+		virtual void _q_endImportMedia();
 
 		MediaManager *q_ptr;
 		QSqlTableModel *model;
+
 		QDir musicDirectory;
 		MusicFileTypeResolver fileTypeResolver;
 		QFileSystemWatcher fileSystemWatcher;
@@ -96,12 +48,15 @@ class MediaManagerPrivate
 		bool watchLibrary;
 		bool writeTagsToFile;
 
+		QThread mediaDiscovererThread;
+		MediaDiscoverer mediaDiscoverer;
+
+		QThread mediaOrganizerThread;
+		MediaOrganizer mediaOrganizer;
+
 		QStringList watchedItemsBackup;
 
 		bool importing;
-
-		QVector<int> importTimes;
-		QTime importTimer;
 };
 
 MediaManagerPrivate::MediaManagerPrivate() :
@@ -113,135 +68,26 @@ MediaManagerPrivate::MediaManagerPrivate() :
    writeTagsToFile(false),
    importing(false)
 {
-	importTimer.start();
+	qRegisterMetaType<QStringList>("QStringList");
+	qRegisterMetaType<TagLib::FileRef>("TagLib::FileRef");
+
+	mediaDiscoverer.moveToThread(&mediaDiscovererThread);
+	mediaDiscovererThread.start();
+
+	mediaOrganizer.moveToThread(&mediaOrganizerThread);
+	mediaOrganizerThread.start();
 }
 
-bool MediaManagerPrivate::organizeFile(TagLib::FileRef &file)
+MediaManagerPrivate::~MediaManagerPrivate()
 {
-	QString path, fileName, fileSuffix;
-	if (generateAnticipatedPath(file, path, fileName, fileSuffix))
-	{
-		QString oldPath = file.file()->name();
-		QString anticipatedPath = path + fileName + "." + fileSuffix;
+	mediaDiscovererThread.requestInterruption();
+	mediaOrganizerThread.requestInterruption();
 
-		// Do we need to organize this file?
-		if (anticipatedPath != oldPath)
-		{
-			QFile oldFile(oldPath);
-			QFile newFile(anticipatedPath);
+	mediaDiscovererThread.quit();
+	mediaOrganizerThread.quit();
 
-			// Find a new filename that doesn't overwrite another
-			int counter = 1;
-			while (newFile.exists())
-			{
-				newFile.setFileName(QString("%1_%2.%3").arg(path+fileName).arg(counter).arg(fileSuffix));
-				counter++;
-			}
-
-			QFileInfo oldFileInfo(oldFile);
-			QFileInfo newFileInfo(newFile);
-			QString newFilePath = newFileInfo.absoluteFilePath();
-			QString newPath = newFileInfo.absolutePath();
-
-			// Continue as long as the path either already exists or was successfully made
-			if (QFileInfo::exists(newPath) || musicDirectory.mkpath(newPath))
-			{
-//				QString basePath = musicDirectory.absolutePath();
-//				int numberOfLibraryPathItems = basePath.count('/');
-//				QStringList directoryList = newPath.split('/', QString::SkipEmptyParts).mid(numberOfLibraryPathItems);
-
-//				for (int i = 0; i < directoryList.size(); ++i)
-//				{
-//					basePath += "/" + directoryList.at(i);
-//					directoryList[i] = basePath;
-//				}
-
-//				fileSystemWatcher.addPaths(directoryList);
-
-				bool success = false;
-
-				if (copyOnImport && !isDirectoryAncestorOfFile(musicDirectory, oldFileInfo))
-				{
-					success = oldFile.copy(newFilePath);
-				}
-				else
-				{
-					success = oldFile.rename(newFilePath);
-				}
-
-				// If the reorganization succeeded, update the record
-				// before it makes it to the database
-				if (success)
-				{
-					file = TagLib::FileRef(newFilePath.toUtf8().constData());
-
-					return true;
-				}
-			}
-			else
-			{
-				qWarning("Cannot create directory: %s. Cannot organize %s.",
-				         newFilePath.toUtf8().constData(),
-				         newFile.fileName().toUtf8().constData());
-			}
-		}
-	}
-
-	return false;
-}
-
-bool MediaManagerPrivate::generateAnticipatedPath(const TagLib::FileRef &file, QString &path,
-                                                  QString &fileName, QString &fileSuffix)
-
-{
-	if (musicDirectory.exists())
-	{
-		TagLib::Tag *tag = file.tag();
-
-		quint32 trackNumber = tag->track();
-		QString title = tag->title().toCString(true);
-		QString artist = tag->artist().toCString(true);
-		QString album = tag->album().toCString(true);
-
-		if (title.isEmpty())
-		{
-			title = "Unknown";
-		}
-
-		if (artist.isEmpty())
-		{
-			artist = "Unknown";
-		}
-
-		if (album.isEmpty())
-		{
-			album = "Unknown";
-		}
-
-		// Remove illegal characters
-		title.replace('/', '_');
-		artist.replace('/', '_');
-		album.replace('/', '_');
-
-		path = musicDirectory.absolutePath() + "/";
-		path.append(artist + "/");
-		path.append(album + "/");
-
-		fileName = "";
-		if (trackNumber > 0)
-		{
-			fileName.append(QString("%1 - ").arg(trackNumber));
-		}
-		fileName.append(title);
-
-		// FileTypeResolver's suffixForFileName only uses the filename to determine
-		// the suffix. So we'll use QMimeType's instead.
-		fileSuffix = fileTypeResolver.mimeTypeForFile(file.file()->name()).preferredSuffix();
-
-		return true;
-	}
-
-	return false;
+	mediaDiscovererThread.wait();
+	mediaOrganizerThread.wait();
 }
 
 void MediaManagerPrivate::updateWatchedPaths(bool reset)
@@ -268,7 +114,7 @@ void MediaManagerPrivate::updateWatchedPaths(bool reset)
 			{
 				fileInfo.setFile(model->data(model->index(i, pathColumn)).toString());
 
-				if (isDirectoryAncestorOfFile(musicDirectory, fileInfo))
+				if (DulcetUtilities::isDirectoryAncestorOfFile(musicDirectory, fileInfo))
 				{
 					thisPath = fileInfo.dir().absolutePath();
 
@@ -287,6 +133,23 @@ void MediaManagerPrivate::updateWatchedPaths(bool reset)
 	}
 }
 
+void MediaManagerPrivate::removeDuplicateDiscoveries(const QStringList &mediaDiscovered, QStringList &newList)
+{
+	int pathColumn = model->record().indexOf("path");
+
+	if (pathColumn >= 0)
+	{
+		// Build set in database
+		QSet<QString> setInDatabase;
+		for (int i = 0; i < model->rowCount(); ++i)
+		{
+			setInDatabase.insert(model->index(i, pathColumn).data().toString());
+		}
+
+		newList = mediaDiscovered.toSet().subtract(setInDatabase).toList();
+	}
+}
+
 void MediaManagerPrivate::validateLibrary()
 {
 	Q_Q(MediaManager);
@@ -299,7 +162,7 @@ void MediaManagerPrivate::validateLibrary()
 	{
 		for (int i = 0; i < model->rowCount(); ++i)
 		{
-			fileInfo.setFile(model->data(model->index(i, pathColumn)).toString());
+			fileInfo.setFile(model->index(i, pathColumn).data().toString());
 
 			if (!fileInfo.exists())
 			{
@@ -313,101 +176,72 @@ void MediaManagerPrivate::validateLibrary()
 	}
 }
 
-void MediaManagerPrivate::recursivelyImportMedia(const QFileInfo &fileInfo)
+bool MediaManagerPrivate::beginImportMedia()
+{
+	if (!importing)
+	{
+		importing = true;
+
+		watchedItemsBackup = fileSystemWatcher.directories() + fileSystemWatcher.files();
+
+		// Temporarily disable the filesystem watcher since an import is about to happen
+		// and we'll probably be manually changing the watched system. Don't need the updates.
+		if (!watchedItemsBackup.isEmpty())
+		{
+			fileSystemWatcher.removePaths(watchedItemsBackup);
+		}
+
+		return true; // Ready to import
+	}
+
+	return false; // Already importing
+}
+
+void MediaManagerPrivate::_q_mediaDiscovered(const QStringList &mediaDiscovered)
+{
+	QStringList newList;
+
+	// Remove file discoveries already in the database
+	removeDuplicateDiscoveries(mediaDiscovered, newList);
+
+	mediaOrganizer.addItemsToOrganize(newList);
+
+	QMetaObject::invokeMethod(&mediaOrganizer, "beginOrganization");
+}
+
+void MediaManagerPrivate::_q_mediaOrganized(const TagLib::FileRef &taggedFile)
 {
 	Q_Q(MediaManager);
 
-	if (model)
+	QSqlRecord newRecord = model->record();
+
+	// Remove the ID, or the cache will get out of sync with the database
+	// and the row won't appear.
+	newRecord.remove(0);
+
+	DulcetUtilities::importTagsToRecord(taggedFile, newRecord);
+
+	if (model->insertRecord(-1, newRecord))
 	{
-		qApp->processEvents();
-
-		QString filePath = fileInfo.absoluteFilePath();
-
-		if (fileInfo.isDir())
-		{
-			QDir directory(filePath);
-
-			QFileInfoList fileInfoList = directory.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
-
-			foreach(const QFileInfo &thisFileInfo, fileInfoList)
-			{
-				recursivelyImportMedia(thisFileInfo);
-			}
-		}
-		else
-		{
-			importTimer.restart();
-			int pathColumn = model->record().indexOf("path");
-			QString thisPath;
-			for (int i = 0; i < model->rowCount(); ++i)
-			{
-				thisPath = model->data(model->index(i, pathColumn)).toString();
-
-				if (filePath == thisPath)
-				{
-					return; // We've already imported this item
-				}
-			}
-
-			if (q->isSupported(fileTypeResolver.mimeTypeForFile(fileInfo).name()))
-			{
-				QByteArray filePathArray = filePath.toUtf8();
-				const char *filePathData = filePathArray.constData();
-				TagLib::FileRef taggedFile(filePathData);
-
-				QSqlRecord newRecord = model->record();
-				// Remove the ID, or the cache will get out of sync with the database
-				// and the row won't appear.
-				newRecord.remove(0);
-
-				if (organizeLibrary && !organizeFile(taggedFile))
-				{
-					qWarning("Unable to organize %s. Skipping...", filePathData);
-					return;
-				}
-
-				importTagsToRecord(taggedFile, newRecord);
-
-				if (model->insertRecord(-1, newRecord))
-				{
-					emit q->importedMedia(model->rowCount(), newRecord);
-				}
-			}
-
-			importTimes.push_back(importTimer.elapsed());
-
-			float sum = 0;
-			for (int i = 0; i < importTimes.size(); ++i)
-			{
-				sum += importTimes.at(i);
-			}
-
-			qDebug() << "Average import time:" << sum / (float) importTimes.size();
-		}
+		emit q->importedMedia(model->rowCount());
 	}
-	else
-	{
-		qWarning("Cannot import media without valid table model!");
-	}
-}
-
-void MediaManagerPrivate::_q_modelDestroyed()
-{
-	model = NULL;
 }
 
 void MediaManagerPrivate::_q_modelBeforeUpdate(int row, QSqlRecord &record)
 {
 	Q_UNUSED(row);
 
-	TagLib::FileRef taggedFile(record.value("path").toString().toUtf8().constData());
+	QString filePath = record.value("path").toString();
+	TagLib::FileRef taggedFile(filePath.toUtf8().constData());
 
 	if (writeTagsToFile)
 	{
-		saveTagsToFile(taggedFile, record);
+		DulcetUtilities::saveTagsToFile(taggedFile, record);
 	}
 
-	if (organizeLibrary && organizeFile(taggedFile))
+	if (organizeLibrary && DulcetUtilities::organizeFile(musicDirectory, taggedFile,
+	                                                     fileTypeResolver.mimeTypeForFile(filePath),
+	                                                     copyOnImport))
 	{
 		record.setValue("path", taggedFile.file()->name());
 		record.setGenerated("path", true);
@@ -427,6 +261,20 @@ void MediaManagerPrivate::_q_directoryChanged(const QString &directory)
 	q->importMedia(QFileInfo(directory));
 }
 
+void MediaManagerPrivate::_q_endImportMedia()
+{
+	// Done importing-- we can re-enable the file system watcher
+	// and add the newly imported media to the watch list
+	if (!watchedItemsBackup.isEmpty())
+	{
+		fileSystemWatcher.addPaths(watchedItemsBackup);
+		watchedItemsBackup.clear(); // Get rid of the backup
+		updateWatchedPaths();
+	}
+
+	importing = false;
+}
+
 ////////// END PRIVATE DATA //////////
 
 MediaManager::MediaManager(QObject *parent) :
@@ -438,24 +286,76 @@ MediaManager::MediaManager(QObject *parent) :
 	d->q_ptr = this;
 
 	connect(&d->fileSystemWatcher, SIGNAL(directoryChanged(QString)), SLOT(_q_directoryChanged(QString)));
+	connect(&d->mediaDiscoverer, SIGNAL(discoveredMedia(QStringList)), SLOT(_q_mediaDiscovered(QStringList)));
+	connect(&d->mediaOrganizer, SIGNAL(organizedMedia(TagLib::FileRef)), SLOT(_q_mediaOrganized(TagLib::FileRef)));
 }
 
-void MediaManager::setModel(QSqlTableModel *model)
+MediaManager::~MediaManager()
+{
+}
+
+bool MediaManager::setDatabase(const QString &adapterType, const QString &databaseFilePath)
 {
 	Q_D(MediaManager);
 
-	if (d->model)
+	QSqlDatabase defaultDatabase = QSqlDatabase::addDatabase(adapterType);
+	defaultDatabase.setDatabaseName(databaseFilePath);
+
+	QSqlDatabase importDatabase = QSqlDatabase::addDatabase(adapterType, "import");
+	importDatabase.setDatabaseName(databaseFilePath);
+
+	if (!defaultDatabase.open() || !importDatabase.open())
 	{
-		disconnect(d->model, SIGNAL(destroyed()), this, SLOT(_q_modelDestroyed()));
-		disconnect(d->model, SIGNAL(beforeUpdate(int,QSqlRecord&)), this, SLOT(_q_modelBeforeUpdate(int,QSqlRecord&)));
+		qFatal("Cannot open database! This program needs SQLite support.");
+		return false;
 	}
 
-	if (model)
+	QSqlQuery query;
+	if (!query.exec("CREATE TABLE IF NOT EXISTS music (id integer primary key)"))
 	{
-		d->model = model;
-		connect(d->model, SIGNAL(destroyed()), SLOT(_q_modelDestroyed()));
-		connect(d->model, SIGNAL(beforeUpdate(int,QSqlRecord&)), SLOT(_q_modelBeforeUpdate(int,QSqlRecord&)));
+		qFatal("Cannot create table: %s", defaultDatabase.lastError().text().toUtf8().constData());
+		return false;
 	}
+
+	// The following queries may or may not succeed depending on if the table already
+	// has those columns. This is so the database can be expanded in the future.
+	query.exec("ALTER TABLE music ADD COLUMN path text");
+	query.exec("ALTER TABLE music ADD COLUMN title text");
+	query.exec("ALTER TABLE music ADD COLUMN artist text");
+	query.exec("ALTER TABLE music ADD COLUMN album text");
+	query.exec("ALTER TABLE music ADD COLUMN comment text");
+	query.exec("ALTER TABLE music ADD COLUMN genre text");
+	query.exec("ALTER TABLE music ADD COLUMN year integer");
+	query.exec("ALTER TABLE music ADD COLUMN track integer");
+	query.exec("ALTER TABLE music ADD COLUMN rating integer");
+
+	if (d->model)
+	{
+		disconnect(d->model, SIGNAL(beforeUpdate(int,QSqlRecord&)), this, SLOT(_q_modelBeforeUpdate(int,QSqlRecord&)));
+		d->model->deleteLater();
+	}
+
+	d->model = new QSqlTableModel(this);
+	d->model->setTable("music");
+
+	connect(d->model, SIGNAL(beforeUpdate(int,QSqlRecord&)), SLOT(_q_modelBeforeUpdate(int,QSqlRecord&)));
+
+	QSqlRecord tmpRecord = d->model->record();
+
+	// Set the column header names
+	for (int i = 0; i < tmpRecord.count(); ++i)
+	{
+		d->model->setHeaderData(i, Qt::Horizontal, tr("%1").arg(tmpRecord.fieldName(i)));
+	}
+
+	return d->model->select();
+}
+
+QSqlTableModel *MediaManager::model()
+{
+	Q_D(MediaManager);
+
+	return d->model;
 }
 
 bool MediaManager::setMusicDirectory(const QDir &directory, bool reindex)
@@ -479,6 +379,7 @@ bool MediaManager::setMusicDirectory(const QDir &directory, bool reindex)
 		}
 
 		d->musicDirectory = directory;
+		d->mediaOrganizer.setLibraryDirectory(directory);
 
 		// Re-index music directory and watch the folders inside, if requested
 		if (reindex)
@@ -497,58 +398,17 @@ const QDir& MediaManager::musicDirectory() const
 	return d->musicDirectory;
 }
 
-bool MediaManager::beginImportMedia()
-{
-	Q_D(MediaManager);
-
-	if (!d->importing)
-	{
-		d->importing = true;
-
-		d->watchedItemsBackup = d->fileSystemWatcher.directories() + d->fileSystemWatcher.files();
-
-		// Temporarily disable the filesystem watcher since an import is about to happen
-		// and we'll probably be manually changing the watched system. Don't need the updates.
-		if (!d->watchedItemsBackup.isEmpty())
-		{
-			d->fileSystemWatcher.removePaths(d->watchedItemsBackup);
-		}
-
-		return true; // Ready to import
-	}
-
-	return false; // Already importing
-}
-
 void MediaManager::importMedia(const QFileInfo &fileInfo)
 {
-	Q_D(MediaManager);
-
-	bool beginWasNotCalled = beginImportMedia();
-
-	d->recursivelyImportMedia(fileInfo);
-
-	// If begin wasn't called, we'll need to call end as well
-	if (beginWasNotCalled)
-	{
-		endImportMedia();
-	}
+	importMedia(QList<QFileInfo>() << fileInfo);
 }
 
-void MediaManager::endImportMedia()
+void MediaManager::importMedia(const QList<QFileInfo> &itemsToImport)
 {
 	Q_D(MediaManager);
 
-	// Done importing-- we can re-enable the file system watcher
-	// and add the newly imported media to the watch list
-	if (!d->watchedItemsBackup.isEmpty())
-	{
-		d->fileSystemWatcher.addPaths(d->watchedItemsBackup);
-		d->watchedItemsBackup.clear(); // Get rid of the backup
-		d->updateWatchedPaths();
-	}
-
-	d->importing = false;
+	d->mediaDiscoverer.addSearchItems(itemsToImport);
+	QMetaObject::invokeMethod(&d->mediaDiscoverer, "beginDiscovery");
 }
 
 void MediaManager::setCopyOnImport(bool enabled)
@@ -556,6 +416,7 @@ void MediaManager::setCopyOnImport(bool enabled)
 	Q_D(MediaManager);
 
 	d->copyOnImport = enabled;
+	d->mediaOrganizer.setCopyOnImport(enabled);
 }
 
 bool MediaManager::copyOnImport() const
@@ -570,6 +431,7 @@ void MediaManager::setOrganizeLibrary(bool enabled)
 	Q_D(MediaManager);
 
 	d->organizeLibrary = enabled;
+	d->mediaOrganizer.setOrganizeLibrary(enabled);
 }
 
 bool MediaManager::organizeLibrary() const
@@ -591,7 +453,12 @@ void MediaManager::setWatchLibrary(bool enabled, bool reindex)
 	}
 	else
 	{
-		d->fileSystemWatcher.removePaths(d->fileSystemWatcher.directories() + d->fileSystemWatcher.files());
+		QStringList currentlyWatchedPaths = d->fileSystemWatcher.directories() + d->fileSystemWatcher.files();
+
+		if (!currentlyWatchedPaths.isEmpty())
+		{
+			d->fileSystemWatcher.removePaths(currentlyWatchedPaths);
+		}
 	}
 }
 

@@ -19,6 +19,8 @@ class SongsView : public MusicViewInterface
 		virtual QAbstractItemView* view();
 		virtual void setModel(QAbstractItemModel *model);
 
+		virtual QStringList visibleColumns();
+
 		virtual QModelIndex nextSong();
 		virtual QModelIndex previousSong();
 
@@ -32,6 +34,7 @@ class SongsView : public MusicViewInterface
 
 	private:
 		QTableView *m_tableView;
+		QHash<QString, int> m_columnNames;
 		QList<QPersistentModelIndex> m_shuffleHistory;
 		QPersistentModelIndex m_currentSong;
 		bool m_shuffleEnabled;

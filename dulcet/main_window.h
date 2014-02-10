@@ -17,8 +17,7 @@ namespace Ui
 
 class MusicFileTypeResolver;
 class MediaManager;
-class QSqlTableModel;
-class QSortFilterProxyModel;
+class SortMultiFilterProxyModel;
 class MusicViewInterface;
 
 class MainWindow : public QMainWindow
@@ -35,12 +34,14 @@ class MainWindow : public QMainWindow
 	private slots:
 		void playSong(const QModelIndex &index);
 		void handleImport(const QList<QUrl> &itemsToImport);
-		void handleImportedMedia(int row, const QSqlRecord &record);
+		void handleImportedMedia(int row);
 		void handleMediaDeleted(const QSqlRecord &recordRemoved);
 		void handlePlayerStateChange(QMediaPlayer::State newState);
+		void handlePlayerStatusChange(QMediaPlayer::MediaStatus status);
 		void handleSearch(const QString &searchString);
 
 		void handleMusicViewChange(QAction *action);
+		void handleColumnVisibilitiesChanged(const QStringList &visibleColumnNames);
 		void showImportDialog();
 		void showPreferences();
 
@@ -63,8 +64,7 @@ class MainWindow : public QMainWindow
 		QMediaPlayer *m_mediaPlayer;
 		MediaManager *m_mediaManager;
 		MusicFileTypeResolver *m_fileTypeResolver;
-		QSqlTableModel *m_mediaTableModel;
-		QSortFilterProxyModel *m_proxyModel;
+		SortMultiFilterProxyModel *m_proxyModel;
 		MusicViewMap_t m_musicViews;
 		MusicViewInterface *m_currentMusicView;
 };

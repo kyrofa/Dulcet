@@ -15,6 +15,7 @@ class Q_DECL_EXPORT MusicViewInterface : public DulcetPluginInterface
 
 		Q_DECL_EXPORT virtual QAbstractItemView* view() = 0;
 		Q_DECL_EXPORT virtual void setModel(QAbstractItemModel *model) = 0;
+		Q_DECL_EXPORT virtual QStringList visibleColumns() = 0;
 
 		Q_DECL_EXPORT virtual QModelIndex nextSong() = 0;
 		Q_DECL_EXPORT virtual QModelIndex previousSong() = 0;
@@ -26,6 +27,7 @@ class Q_DECL_EXPORT MusicViewInterface : public DulcetPluginInterface
 
 	signals:
 		Q_DECL_EXPORT void playSong(const QModelIndex &index);
+		Q_DECL_EXPORT void columnVisibilitiesChanged(const QStringList &visibleColumnNames);
 };
 
 Q_DECLARE_INTERFACE(MusicViewInterface, "dulcet.plugins.MusicViewInterface")

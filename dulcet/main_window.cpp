@@ -6,7 +6,6 @@
 #include <QTreeView>
 #include <QSqlDatabase>
 #include <QSqlTableModel>
-#include <QSortFilterProxyModel>
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QSqlIndex>
@@ -16,6 +15,7 @@
 #include <QPluginLoader>
 #include "plugins/plugin_interfaces/music_view_interface.h"
 
+#include "sort_multi_filter_proxy_model.h"
 #include "music_file_type_resolver.h"
 #include "media_manager.h"
 
@@ -39,14 +39,12 @@ MainWindow::MainWindow(QWidget *parent) :
    m_mediaPlayer(new QMediaPlayer(this)),
    m_mediaManager(new MediaManager(this)),
    m_fileTypeResolver(new MusicFileTypeResolver),
-   m_proxyModel(new QSortFilterProxyModel(this)),
+   m_proxyModel(new SortMultiFilterProxyModel(this)),
    m_currentMusicView(NULL)
 {
 	m_ui->setupUi(this);
 
 	TagLib::FileRef::addFileTypeResolver(m_fileTypeResolver);
-
-	QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE");
 
 	QString databaseFilePath = "Dulcet.db";
 	QStringList possibleDataLocations = QStandardPaths::standardLocations(QStandardPaths::DataLocation);
@@ -64,9 +62,7 @@ MainWindow::MainWindow(QWidget *parent) :
 		}
 	}
 
-	database.setDatabaseName(databaseFilePath);
-
-	if (!database.open())
+	if (!m_mediaManager->setDatabase("QSQLITE", databaseFilePath))
 	{
 		QMessageBox::critical(this, tr("Cannot open database"),
 		                      tr("Unable to establish a database connection.\n"
@@ -75,55 +71,24 @@ MainWindow::MainWindow(QWidget *parent) :
 		exit(-1);
 	}
 
-	QSqlQuery query;
-	if (!query.exec("CREATE TABLE IF NOT EXISTS music (id integer primary key)"))
-	{
-		QMessageBox::critical(this, tr("Cannot create table"),
-		                      tr("Click Cancel to exit."), QMessageBox::Cancel);
-		exit(-2);
-	}
-
-	// The following queries may or may not succeed depending on if the table already
-	// has those columns. This is so the database can be expanded in the future.
-	query.exec("ALTER TABLE music ADD COLUMN path text");
-	query.exec("ALTER TABLE music ADD COLUMN title text");
-	query.exec("ALTER TABLE music ADD COLUMN artist text");
-	query.exec("ALTER TABLE music ADD COLUMN album text");
-	query.exec("ALTER TABLE music ADD COLUMN comment text");
-	query.exec("ALTER TABLE music ADD COLUMN genre text");
-	query.exec("ALTER TABLE music ADD COLUMN year integer");
-	query.exec("ALTER TABLE music ADD COLUMN track integer");
-	query.exec("ALTER TABLE music ADD COLUMN rating integer");
-
-	m_mediaTableModel = new QSqlTableModel(this);
-	m_mediaTableModel->setTable("music");
-	m_mediaTableModel->select();
-
-	QSqlRecord tmpRecord = m_mediaTableModel->record();
-
-	// Set the column header names
-	for (int i = 0; i < tmpRecord.count(); ++i)
-	{
-		m_mediaTableModel->setHeaderData(i, Qt::Horizontal, tr("%1").arg(tmpRecord.fieldName(i)));
-	}
-
 	connect(m_ui->searchLineEdit, SIGNAL(textChanged(QString)), SLOT(handleSearch(QString)));
 
 	connect(m_mediaPlayer, SIGNAL(stateChanged(QMediaPlayer::State)), SLOT(handlePlayerStateChange(QMediaPlayer::State)));
+	connect(m_mediaPlayer, SIGNAL(mediaStatusChanged(QMediaPlayer::MediaStatus)), SLOT(handlePlayerStatusChange(QMediaPlayer::MediaStatus)));
 
 	connect(m_ui->viewWidget, SIGNAL(requestImport(QList<QUrl>)), SLOT(handleImport(QList<QUrl>)));
 
-	connect(m_mediaManager, SIGNAL(importedMedia(int,QSqlRecord)), SLOT(handleImportedMedia(int,QSqlRecord)));
+	connect(m_mediaManager, SIGNAL(importedMedia(int)), SLOT(handleImportedMedia(int)));
 
 	connect(m_mediaManager, SIGNAL(deletedMedia(QSqlRecord)), SLOT(handleMediaDeleted(QSqlRecord)));
 
 	connect(m_ui->importAction, SIGNAL(triggered()), SLOT(showImportDialog()));
 	connect(m_ui->preferencesAction, SIGNAL(triggered()), SLOT(showPreferences()));
 
-	m_proxyModel->setSourceModel(m_mediaTableModel);
+	m_proxyModel->setSourceModel(m_mediaManager->model());
 	m_proxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+	m_proxyModel->setFilterKeyColumn(-1);
 
-	m_mediaManager->setModel(m_mediaTableModel);
 	m_mediaManager->setCopyOnImport(true);
 	m_mediaManager->setOrganizeLibrary(true);
 	m_mediaManager->setWriteTagsToFile(true);
@@ -192,7 +157,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::playSong(const QModelIndex &index)
 {
-	QSqlRecord sqlRecord = m_mediaTableModel->record(m_proxyModel->mapToSource(index).row());
+	QSqlRecord sqlRecord = m_mediaManager->model()->record(m_proxyModel->mapToSource(index).row());
 	QString title = sqlRecord.value("title").toString();
 	QString artist = sqlRecord.value("artist").toString();
 	QString album = sqlRecord.value("album").toString();
@@ -209,30 +174,31 @@ void MainWindow::playSong(const QModelIndex &index)
 
 void MainWindow::handleImport(const QList<QUrl> &itemsToImport)
 {
-	if (!itemsToImport.isEmpty())
+	QList<QFileInfo> localFilesToImport;
+
+	foreach(const QUrl &item, itemsToImport)
 	{
-		m_mediaManager->beginImportMedia();
-
-		// Extract the local paths of the files
-		for (int i = 0; i < itemsToImport.size(); ++i)
+		if (item.isLocalFile())
 		{
-			QFileInfo fileInfo(itemsToImport.at(i).toLocalFile());
-
-			if (fileInfo.exists())
-			{
-				m_mediaManager->importMedia(fileInfo);
-			}
+			localFilesToImport.append(QFileInfo(item.toLocalFile()));
 		}
-
-		m_mediaManager->endImportMedia();
+		else
+		{
+			qWarning("%s does not support importing remote files.",
+			         QApplication::applicationName().toUtf8().constData());
+		}
 	}
+
+	m_mediaManager->importMedia(localFilesToImport);
 }
 
-void MainWindow::handleImportedMedia(int row, const QSqlRecord &record)
+void MainWindow::handleImportedMedia(int row)
 {
 	Q_UNUSED(row);
 
-	statusBar()->showMessage(tr("Imported %1").arg(record.value("title").toString()), 2000);
+	m_mediaManager->model()->select();
+
+	//statusBar()->showMessage(tr("Imported %1").arg(record.value("title").toString()), 2000);
 
 	if (m_currentMusicView && !m_currentMusicView->view()->isVisible())
 	{
@@ -244,7 +210,7 @@ void MainWindow::handleMediaDeleted(const QSqlRecord &recordRemoved)
 {
 	Q_UNUSED(recordRemoved);
 
-	if (m_currentMusicView && (m_mediaTableModel->rowCount() == 0))
+	if (m_currentMusicView && (m_mediaManager->model()->rowCount() == 0))
 	{
 		m_currentMusicView->view()->hide();
 		m_ui->placeHolderLabel->show();
@@ -264,6 +230,18 @@ void MainWindow::handlePlayerStateChange(QMediaPlayer::State newState)
 	}
 }
 
+void MainWindow::handlePlayerStatusChange(QMediaPlayer::MediaStatus status)
+{
+	switch (status)
+	{
+		case QMediaPlayer::EndOfMedia:
+			on_nextButton_clicked(); // Go to the next song
+			break;
+		default:
+			break;
+	}
+}
+
 void MainWindow::handleSearch(const QString &searchString)
 {
 	m_proxyModel->setFilterFixedString(searchString);
@@ -279,6 +257,7 @@ void MainWindow::handleMusicViewChange(QAction *action)
 		{
 			// Make sure the old view no longer has the power to influence which song is playing
 			disconnect(m_currentMusicView, SIGNAL(playSong(QModelIndex)), this, SLOT(playSong(QModelIndex)));
+			disconnect(m_currentMusicView, SIGNAL(columnVisibilitiesChanged(QStringList)), this, SLOT(handleColumnVisibilitiesChanged(QStringList)));
 			m_currentMusicView->view()->hide();
 		}
 
@@ -293,7 +272,7 @@ void MainWindow::handleMusicViewChange(QAction *action)
 		layout->addWidget(view);
 		layout->addWidget(m_ui->placeHolderLabel);
 
-		if (m_mediaTableModel->rowCount() > 0)
+		if (m_mediaManager->model()->rowCount() > 0)
 		{
 			view->show();
 		}
@@ -306,6 +285,9 @@ void MainWindow::handleMusicViewChange(QAction *action)
 
 		// Give this view the power to influence which song is playing
 		connect(m_currentMusicView, SIGNAL(playSong(QModelIndex)), SLOT(playSong(QModelIndex)));
+		connect(m_currentMusicView, SIGNAL(columnVisibilitiesChanged(QStringList)), SLOT(handleColumnVisibilitiesChanged(QStringList)));
+
+		handleColumnVisibilitiesChanged(m_currentMusicView->visibleColumns());
 
 		action->setChecked(true);
 	}
@@ -313,6 +295,22 @@ void MainWindow::handleMusicViewChange(QAction *action)
 	{
 		qWarning("Invalid music view: %s", actionText.toUtf8().constData());
 	}
+}
+
+void MainWindow::handleColumnVisibilitiesChanged(const QStringList &visibleColumnNames)
+{
+	QSqlRecord record = m_mediaManager->model()->record();
+	QVector<int> visibleColumns;
+
+	foreach (const QString &thisColumnName, visibleColumnNames)
+	{
+		if (record.contains(thisColumnName))
+		{
+			visibleColumns.append(record.indexOf(thisColumnName));
+		}
+	}
+
+	m_proxyModel->setFilterKeyColumns(visibleColumns);
 }
 
 void MainWindow::showImportDialog()
