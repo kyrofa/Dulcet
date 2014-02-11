@@ -112,10 +112,11 @@ void MediaDiscoverer::beginDiscovery()
 
 		emit beginningDiscovery();
 
+		bool stop = false;
 		QFileInfo fileInfo;
 		int count = 0;
 
-		while (d->nextItemToSearch(fileInfo))
+		while (d->nextItemToSearch(fileInfo) && !stop)
 		{
 			if (fileInfo.isFile())
 			{
@@ -141,16 +142,10 @@ void MediaDiscoverer::beginDiscovery()
 					// Check for interruption every ten files (or folders)
 					if (((count % 10) == 0) && thread()->isInterruptionRequested())
 					{
-						qDebug() << "Interrupt requested! Stopping media discovery.";
+						qDebug("Interrupt requested! Stopping media discovery.");
 
-						d->searchInProgress = false;
-
-						if (!d->discoveredMedia.isEmpty())
-						{
-							emit discoveredMedia(d->discoveredMedia);
-						}
-
-						return;
+						stop = true;
+						break; // Get out of the inner loop
 					}
 				}
 			}

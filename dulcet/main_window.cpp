@@ -11,6 +11,7 @@
 #include <QSqlIndex>
 #include <QMessageBox>
 #include <QSettings>
+#include <QCloseEvent>
 
 #include <QPluginLoader>
 #include "plugins/plugin_interfaces/music_view_interface.h"
@@ -150,8 +151,25 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-	saveSettings();
+	if (m_mediaManager->isImporting())
+	{
+		int button = QMessageBox::question(this, tr("Import In Progress"),
+		                                   tr("An import is currently in progress. "
+		                                      "Are you sure you'd like to cancel this import "
+		                                      " and quit?"));
 
+		if (button == QMessageBox::Yes)
+		{
+			m_mediaManager->cancelImport(true);
+		}
+		else
+		{
+			event->ignore(); // Don't close
+			return;
+		}
+	}
+
+	saveSettings();
 	QMainWindow::closeEvent(event);
 }
 
