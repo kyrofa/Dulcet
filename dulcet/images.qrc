@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/images">
+        <file alias="pause_button">images/pause_button.svg</file>
+        <file alias="play_button">images/play_button.svg</file>
+        <file alias="next_button">images/next_button.svg</file>
+        <file alias="previous_button">images/previous_button.svg</file>
+    </qresource>
+</RCC>
