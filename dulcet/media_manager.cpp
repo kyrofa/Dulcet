@@ -33,9 +33,9 @@ class MediaManagerPrivate
 		// slots:
 		virtual void _q_mediaDiscovered(const QStringList &mediaDiscovered);
 		virtual void _q_mediaOrganized(const TagLib::FileRef &taggedFile);
+		virtual void _q_endImportMedia();
 		virtual void _q_modelBeforeUpdate(int row, QSqlRecord &record);
 		virtual void _q_directoryChanged(const QString &directory);
-		virtual void _q_endImportMedia();
 
 		MediaManager *q_ptr;
 		QSqlTableModel *model;
@@ -56,7 +56,8 @@ class MediaManagerPrivate
 
 		QStringList watchedItemsBackup;
 
-		bool importing;
+		bool currentlyDiscovering;
+		bool currentlyOrganizing;
 };
 
 MediaManagerPrivate::MediaManagerPrivate() :
@@ -66,7 +67,8 @@ MediaManagerPrivate::MediaManagerPrivate() :
    organizeLibrary(false),
    watchLibrary(false),
    writeTagsToFile(false),
-   importing(false)
+   currentlyDiscovering(false),
+   currentlyOrganizing(false)
 {
 	qRegisterMetaType<QStringList>("QStringList");
 	qRegisterMetaType<TagLib::FileRef>("TagLib::FileRef");
@@ -114,6 +116,7 @@ void MediaManagerPrivate::updateWatchedPaths(bool reset)
 			{
 				fileInfo.setFile(model->data(model->index(i, pathColumn)).toString());
 
+				// Only watch directories within library directory
 				if (DulcetUtilities::isDirectoryAncestorOfFile(musicDirectory, fileInfo))
 				{
 					thisPath = fileInfo.dir().absolutePath();
@@ -178,10 +181,9 @@ void MediaManagerPrivate::validateLibrary()
 
 bool MediaManagerPrivate::beginImportMedia()
 {
-	if (!importing)
+	bool notPreviouslyImporting = false;
+	if (!(currentlyDiscovering || currentlyOrganizing))
 	{
-		importing = true;
-
 		watchedItemsBackup = fileSystemWatcher.directories() + fileSystemWatcher.files();
 
 		// Temporarily disable the filesystem watcher since an import is about to happen
@@ -191,14 +193,17 @@ bool MediaManagerPrivate::beginImportMedia()
 			fileSystemWatcher.removePaths(watchedItemsBackup);
 		}
 
-		return true; // Ready to import
+		notPreviouslyImporting = true; // Ready to import
 	}
 
-	return false; // Already importing
+	currentlyDiscovering = true;
+	return notPreviouslyImporting;
 }
 
 void MediaManagerPrivate::_q_mediaDiscovered(const QStringList &mediaDiscovered)
 {
+	currentlyDiscovering = false;
+
 	QStringList newList;
 
 	// Remove file discoveries already in the database
@@ -206,6 +211,7 @@ void MediaManagerPrivate::_q_mediaDiscovered(const QStringList &mediaDiscovered)
 
 	mediaOrganizer.addItemsToOrganize(newList);
 
+	currentlyOrganizing = true;
 	QMetaObject::invokeMethod(&mediaOrganizer, "beginOrganization");
 }
 
@@ -225,6 +231,20 @@ void MediaManagerPrivate::_q_mediaOrganized(const TagLib::FileRef &taggedFile)
 	{
 		emit q->importedMedia(model->rowCount());
 	}
+}
+
+void MediaManagerPrivate::_q_endImportMedia()
+{
+	// Done importing-- we can re-enable the file system watcher
+	// and add the newly imported media to the watch list
+	if (!watchedItemsBackup.isEmpty())
+	{
+		fileSystemWatcher.addPaths(watchedItemsBackup);
+		watchedItemsBackup.clear(); // Get rid of the backup
+		updateWatchedPaths();
+	}
+
+	currentlyOrganizing = false;
 }
 
 void MediaManagerPrivate::_q_modelBeforeUpdate(int row, QSqlRecord &record)
@@ -252,27 +272,11 @@ void MediaManagerPrivate::_q_directoryChanged(const QString &directory)
 {
 	Q_Q(MediaManager);
 
-	qDebug() << "Directory changed:" << directory;
-
 	// Validate that the songs we know about are still there
 	validateLibrary();
 
 	// Find any new songs that have been put there
 	q->importMedia(QFileInfo(directory));
-}
-
-void MediaManagerPrivate::_q_endImportMedia()
-{
-	// Done importing-- we can re-enable the file system watcher
-	// and add the newly imported media to the watch list
-	if (!watchedItemsBackup.isEmpty())
-	{
-		fileSystemWatcher.addPaths(watchedItemsBackup);
-		watchedItemsBackup.clear(); // Get rid of the backup
-		updateWatchedPaths();
-	}
-
-	importing = false;
 }
 
 ////////// END PRIVATE DATA //////////
@@ -288,6 +292,7 @@ MediaManager::MediaManager(QObject *parent) :
 	connect(&d->fileSystemWatcher, SIGNAL(directoryChanged(QString)), SLOT(_q_directoryChanged(QString)));
 	connect(&d->mediaDiscoverer, SIGNAL(discoveredMedia(QStringList)), SLOT(_q_mediaDiscovered(QStringList)));
 	connect(&d->mediaOrganizer, SIGNAL(organizedMedia(TagLib::FileRef)), SLOT(_q_mediaOrganized(TagLib::FileRef)));
+	connect(&d->mediaOrganizer, SIGNAL(finishedOrganization()), SLOT(_q_endImportMedia()));
 }
 
 MediaManager::~MediaManager()
@@ -358,6 +363,41 @@ QSqlTableModel *MediaManager::model()
 	return d->model;
 }
 
+bool MediaManager::isImporting() const
+{
+	Q_D(const MediaManager);
+
+	return d->currentlyDiscovering || d->currentlyOrganizing;
+}
+
+void MediaManager::cancelImport(bool shutdown)
+{
+	Q_D(MediaManager);
+
+	// Let the discoverer and organizer know they need to stop
+	d->mediaDiscovererThread.requestInterruption();
+	d->mediaOrganizerThread.requestInterruption();
+
+	if (shutdown)
+	{
+		if (d->currentlyDiscovering)
+		{
+			qDebug("Currently discovering. Wait just a moment...");
+			QEventLoop loop;
+			loop.connect(&d->mediaDiscoverer, SIGNAL(finishedDiscovery()), SLOT(quit()));
+			loop.exec();
+		}
+
+		if (d->currentlyOrganizing)
+		{
+			qDebug("Currently organizing. Wait just a moment...");
+			QEventLoop loop;
+			loop.connect(&d->mediaOrganizer, SIGNAL(finishedOrganization()), SLOT(quit()));
+			loop.exec();
+		}
+	}
+}
+
 bool MediaManager::setMusicDirectory(const QDir &directory, bool reindex)
 {
 	Q_D(MediaManager);
@@ -406,6 +446,8 @@ void MediaManager::importMedia(const QFileInfo &fileInfo)
 void MediaManager::importMedia(const QList<QFileInfo> &itemsToImport)
 {
 	Q_D(MediaManager);
+
+	d->beginImportMedia();
 
 	d->mediaDiscoverer.addSearchItems(itemsToImport);
 	QMetaObject::invokeMethod(&d->mediaDiscoverer, "beginDiscovery");

@@ -184,7 +184,7 @@ void MediaOrganizer::beginOrganization()
 			// Check for interruption every ten files (or folders)
 			if (((count % 10) == 0) && thread()->isInterruptionRequested())
 			{
-				qDebug() << "Interrupt requested! Stopping media organization.";
+				qDebug("Interrupt requested! Stopping media organization.");
 				break;
 			}
 		}

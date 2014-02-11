@@ -24,6 +24,9 @@ class MediaManager : public QObject
 		bool setDatabase(const QString &adapterType, const QString &databaseFilePath);
 		QSqlTableModel *model();
 
+		bool isImporting() const;
+		void cancelImport(bool shutdown = false);
+
 		bool setMusicDirectory(const QDir &directory, bool reindex = true);
 		const QDir& musicDirectory() const;
 
@@ -49,7 +52,6 @@ class MediaManager : public QObject
 		QScopedPointer<MediaManagerPrivate> d_ptr;
 
 	signals:
-		void cancelImport();
 		void importedMedia(int row);
 		void deletedMedia(const QSqlRecord &record);
 
